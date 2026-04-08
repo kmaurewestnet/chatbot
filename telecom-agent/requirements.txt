@@ -1,5 +1,5 @@
 # LLM / Agent
-langchain>=0.2.5
+langchain>=0.2.5,<1.0.0
 langchain-core>=0.2.5
 langchain-community>=0.2.5
 langchain-ollama>=0.2.0
