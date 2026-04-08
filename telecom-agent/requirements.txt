@@ -31,7 +31,7 @@ markdown>=3.6
 httpx>=0.27.0
 
 # Monitoring
-langfuse>=2.36.0
+langfuse>=2.36.0,<3.0.0
 
 # Audio (Whisper local)
 openai-whisper>=20231117
