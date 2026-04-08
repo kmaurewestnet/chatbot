@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Telecom Agent — Dev UI</title>
+  <link rel="stylesheet" href="/ui/style.css" />
+  <!-- CDN: Alpine.js + marked.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script defer src="/ui/app.js"></script>
+</head>
+<body>
+
+<!-- ============================================================
+     HEALTH BAR
+     ============================================================ -->
+<div id="health-bar" x-data="healthBar">
+  <span class="logo">⚡ Telecom Agent</span>
+
+  <template x-for="[key, label] in [['redis','Redis'],['qdrant','Qdrant'],['ollama','Ollama']]" :key="key">
+    <span class="dep-status" :title="deps[key]?.detail || 'cargando…'">
+      <span class="dep-dot" :class="dotClass(deps[key])"></span>
+      <span class="dep-name" x-text="label"></span>
+    </span>
+  </template>
+
+  <span style="font-size:11px;color:var(--text-muted)" x-text="overall === 'ok' ? '● todo ok' : overall === 'degraded' ? '◐ degradado' : overall === 'error' ? '● error' : '…'"></span>
+</div>
+
+<!-- ============================================================
+     MAIN GRID
+     ============================================================ -->
+<div id="app">
+
+  <!-- ===================== CHAT PANEL ===================== -->
+  <section class="panel" x-data="chatPanel">
+
+    <div class="panel-header">
+      <span>Chat — Modo Desarrollador</span>
+      <div class="actions">
+        <label class="toggle-wrap">
+          <span>Tool calls</span>
+          <label class="toggle">
+            <input type="checkbox" x-model="showTools" />
+            <span class="toggle-slider"></span>
+          </label>
+        </label>
+        <button class="btn btn-secondary" @click="newSession" title="Nueva sesión">↺ Nueva sesión</button>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div id="chat-messages" x-ref="messages">
+      <template x-if="messages.length === 0">
+        <p class="empty-state">Enviá un mensaje para comenzar.</p>
+      </template>
+
+      <template x-for="(msg, i) in messages" :key="i">
+        <div class="msg" :class="msg.role">
+          <div class="msg-bubble" x-text="msg.content"></div>
+
+          <!-- Tool events (solo modo dev) -->
+          <template x-if="showTools && msg.toolEvents && msg.toolEvents.length > 0">
+            <div class="tool-events">
+              <template x-for="(ev, j) in msg.toolEvents" :key="j">
+                <div class="tool-event">
+                  <div class="tool-event-header">
+                    <span class="tool-tag">tool</span>
+                    <span x-text="ev.tool_name"></span>
+                  </div>
+                  <div class="tool-event-body">
+                    <div style="color:#8892b0;margin-bottom:4px">args: <span x-text="fmtToolArgs(ev.args)"></span></div>
+                    <div>→ <span x-text="fmtToolResult(ev.result)"></span></div>
+                  </div>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <span class="msg-time" x-text="fmtTime(msg.ts)"></span>
+        </div>
+      </template>
+
+      <!-- Typing indicator -->
+      <template x-if="loading">
+        <div class="msg agent">
+          <div class="msg-bubble" style="display:flex;align-items:center;gap:8px">
+            <span class="spinner"></span>
+            <span style="color:var(--text-muted);font-size:12px">el agente está pensando…</span>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <!-- Input area -->
+    <div id="chat-input-area">
+      <div class="session-row">
+        <span>Sesión:</span>
+        <input type="text" x-model="sessionId" spellcheck="false" />
+        <button class="btn btn-ghost btn-icon" @click="sessionId = $store?.uuid4?.() ?? crypto.randomUUID()" title="Generar nuevo ID">⟳</button>
+      </div>
+      <div class="input-row">
+        <textarea
+          id="msg-input"
+          x-model="input"
+          @keydown="onKeydown"
+          placeholder="Escribí tu mensaje… (Enter para enviar, Shift+Enter para nueva línea)"
+          rows="2"
+          :disabled="loading"
+        ></textarea>
+        <button class="btn btn-primary" @click="send" :disabled="loading || !input.trim()">
+          <template x-if="!loading">Enviar</template>
+          <template x-if="loading"><span class="spinner"></span></template>
+        </button>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- ===================== KNOWLEDGE PANEL ===================== -->
+  <section class="panel" id="knowledge-panel" x-data="knowledgePanel">
+
+    <div class="panel-header">
+      <span>Knowledge Base — RAG</span>
+      <div class="actions">
+        <button
+          class="btn btn-secondary"
+          @click="triggerReindex"
+          :disabled="reindexRunning"
+          x-text="reindexLabel()"
+        ></button>
+        <label class="btn btn-secondary" style="cursor:pointer" title="Subir archivo .md o .txt">
+          ↑ Subir
+          <input id="upload-input" type="file" accept=".md,.txt" @change="uploadFile" />
+        </label>
+      </div>
+    </div>
+
+    <!-- Reindex status bar -->
+    <template x-if="reindex">
+      <div id="reindex-bar">
+        <template x-if="reindexRunning"><span class="spinner"></span></template>
+        <span x-text="
+          reindex.status === 'pending' ? 'Iniciando re-indexado…' :
+          reindex.status === 'running' ? 'Indexando documentos…' :
+          reindex.status === 'done'    ? `Re-indexado completo: ${reindex.chunks} chunks indexados.` :
+          `Error en re-indexado: ${reindex.error}`
+        "></span>
+        <button class="btn btn-ghost btn-icon" @click="reindex = null" style="margin-left:auto">✕</button>
+      </div>
+    </template>
+
+    <div id="knowledge-body">
+
+      <!-- File list column -->
+      <div id="file-list-col">
+        <div style="padding:8px 12px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+          <span style="font-size:11px;color:var(--text-muted)" x-text="`${files.length} archivo${files.length !== 1 ? 's' : ''}`"></span>
+          <button class="btn btn-ghost btn-icon" @click="loadFiles" title="Refrescar lista">↻</button>
+        </div>
+        <div id="file-list">
+          <template x-if="files.length === 0">
+            <p class="empty-state">Sin archivos.<br/>Subí un .md o .txt.</p>
+          </template>
+          <template x-for="file in files" :key="file.name">
+            <div
+              class="file-item"
+              :class="{ active: selected?.name === file.name }"
+              @click="viewFile(file)"
+            >
+              <div style="flex:1;min-width:0">
+                <div class="file-name" x-text="file.name"></div>
+                <div class="file-meta" x-text="`${fmtBytes(file.size_bytes)} · ${fmtDate(file.modified_iso)}`"></div>
+              </div>
+              <div class="file-actions">
+                <button
+                  class="btn btn-ghost btn-icon"
+                  style="color:var(--red)"
+                  @click.stop="deleteFile(file.name)"
+                  :disabled="deletingFile === file.name"
+                  title="Borrar"
+                >✕</button>
+              </div>
+            </div>
+          </template>
+        </div>
+      </div>
+
+      <!-- File view/edit column -->
+      <div id="file-view-col">
+        <template x-if="!selected">
+          <div style="flex:1;display:flex;align-items:center;justify-content:center">
+            <p class="empty-state">Seleccioná un archivo para ver su contenido.</p>
+          </div>
+        </template>
+
+        <template x-if="selected">
+          <div style="display:flex;flex-direction:column;height:100%">
+            <div id="file-toolbar">
+              <span id="file-name-label" x-text="selected.name"></span>
+              <template x-if="!isEditing">
+                <button class="btn btn-secondary" @click="startEdit">✎ Editar</button>
+              </template>
+              <template x-if="isEditing">
+                <div style="display:flex;gap:6px">
+                  <button class="btn btn-primary" @click="saveFile" :disabled="savingFile">
+                    <template x-if="!savingFile">Guardar</template>
+                    <template x-if="savingFile"><span class="spinner"></span></template>
+                  </button>
+                  <button class="btn btn-secondary" @click="cancelEdit" :disabled="savingFile">Cancelar</button>
+                </div>
+              </template>
+            </div>
+
+            <div id="file-content-area">
+              <!-- Preview mode -->
+              <template x-if="!isEditing">
+                <template x-if="loadingFile">
+                  <p class="empty-state"><span class="spinner"></span></p>
+                </template>
+                <div x-show="!loadingFile" id="file-preview" x-html="renderedContent()"></div>
+              </template>
+
+              <!-- Edit mode -->
+              <template x-if="isEditing">
+                <textarea
+                  id="file-editor"
+                  x-model="editContent"
+                  spellcheck="false"
+                ></textarea>
+              </template>
+            </div>
+          </div>
+        </template>
+      </div>
+
+    </div>
+  </section>
+
+</div>
+
+</body>
+</html>

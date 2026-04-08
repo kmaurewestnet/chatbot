@@ -1,0 +1,43 @@
+# LLM / Agent
+langchain-core>=0.2.5
+langchain-community>=0.2.5
+langchain-ollama>=0.2.0
+langgraph>=0.2.0
+
+# Vector store
+qdrant-client>=1.9.0
+langchain-qdrant>=0.1.0
+
+# Session memory
+redis>=5.0.0
+hiredis>=2.3.2
+
+# API
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+websockets>=12.0
+python-multipart>=0.0.9
+
+# Config
+pydantic-settings>=2.3.0
+python-dotenv>=1.0.0
+
+# Document loading (RAG indexing)
+pypdf>=4.2.0
+unstructured>=0.14.0
+markdown>=3.6
+
+# HTTP client (CRM / network diagnostics)
+httpx>=0.27.0
+
+# Monitoring
+langfuse>=2.36.0
+
+# Audio (Whisper local)
+openai-whisper>=20231117
+
+# Testing
+pytest>=8.2.0
+pytest-asyncio>=0.23.0
+httpx>=0.27.0
+fakeredis[aioredis]>=2.23.0
