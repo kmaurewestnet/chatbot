@@ -16,6 +16,7 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./knowledge:/app/knowledge:rw
+      - ./app/static:/app/app/static:ro
     restart: unless-stopped
 
   redis:
