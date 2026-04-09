@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     langfuse_public_key: str = "change_me"
     langfuse_secret_key: str = "change_me"
 
+    # RAG — chunking
+    rag_chunk_size: int = 1024
+    rag_chunk_overlap: int = 128
+    # RAG — retrieval
+    rag_top_k: int = 6
+    rag_score_threshold: float = 0.65
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

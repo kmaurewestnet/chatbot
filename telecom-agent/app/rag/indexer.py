@@ -12,9 +12,8 @@ import logging
 from pathlib import Path
 
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
-from langchain_community.document_loaders import UnstructuredMarkdownLoader
 from langchain_qdrant import QdrantVectorStore
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
@@ -24,12 +23,6 @@ from app.rag.embeddings import EMBED_DIM, get_embeddings
 logger = logging.getLogger(__name__)
 
 KNOWLEDGE_DIR = Path(__file__).parent.parent.parent / "knowledge"
-
-# Chunk size optimizado para documentos técnicos de telecom:
-# - 512 tokens captura un procedimiento completo o una entrada de FAQ
-# - 64 tokens de overlap evita partir pasos de un procedimiento
-CHUNK_SIZE = 512
-CHUNK_OVERLAP = 64
 
 
 def _create_collection(client: QdrantClient, force: bool = False) -> None:
@@ -70,11 +63,12 @@ def index_knowledge_base(force: bool = True) -> int:
     if not KNOWLEDGE_DIR.exists():
         raise FileNotFoundError(f"Directorio knowledge/ no encontrado en {KNOWLEDGE_DIR}")
 
-    # Cargar documentos .md y .txt
+    # Cargar .md como texto plano (preserva sintaxis de headers para MarkdownHeaderTextSplitter)
     loader = DirectoryLoader(
         str(KNOWLEDGE_DIR),
         glob="**/*.md",
-        loader_cls=UnstructuredMarkdownLoader,
+        loader_cls=TextLoader,
+        loader_kwargs={"encoding": "utf-8"},
         show_progress=True,
         silent_errors=True,
     )
@@ -97,13 +91,33 @@ def index_knowledge_base(force: bool = True) -> int:
 
     logger.info("Documentos cargados: %d", len(docs))
 
-    # Dividir en chunks
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
+    # Etapa 1: split por headers Markdown — preserva coherencia de secciones y pasos numerados
+    header_splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=[("#", "Header1"), ("##", "Header2"), ("###", "Header3")],
+        strip_headers=False,  # conserva el título dentro del chunk para mejor embedding
+    )
+
+    # Etapa 2: split por caracteres dentro de cada sección (para secciones largas)
+    char_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=settings.rag_chunk_size,
+        chunk_overlap=settings.rag_chunk_overlap,
         separators=["\n\n", "\n", ". ", " ", ""],
     )
-    chunks = splitter.split_documents(docs)
+
+    section_docs = []
+    for doc in docs:
+        sections = header_splitter.split_text(doc.page_content)
+        for section in sections:
+            section.metadata.update(doc.metadata)
+        section_docs.extend(sections)
+
+    chunks = char_splitter.split_documents(section_docs)
+
+    # Enriquecer metadata con nombre de archivo limpio
+    for chunk in chunks:
+        src = chunk.metadata.get("source", "")
+        chunk.metadata["doc_name"] = src.split("/")[-1].split("\\")[-1]
+
     logger.info("Chunks generados: %d", len(chunks))
 
     # Crear/recrear colección

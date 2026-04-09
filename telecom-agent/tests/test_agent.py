@@ -46,7 +46,7 @@ def test_tools_have_docstrings():
 def test_rag_retriever_empty_collection():
     """El retriever debe retornar mensaje de fallback si no hay resultados."""
     with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
-        mock_store_cls.return_value.similarity_search.return_value = []
+        mock_store_cls.return_value.similarity_search_with_score.return_value = []
 
         from app.rag.retriever import search_knowledge
 
@@ -55,19 +55,18 @@ def test_rag_retriever_empty_collection():
 
 
 def test_rag_retriever_formats_results():
-    """El retriever debe formatear los chunks con número y fuente."""
+    """El retriever debe formatear los chunks con número, fuente y sección."""
     from langchain_core.documents import Document
 
     mock_docs = [
-        Document(page_content="Plan básico 100 Mbps", metadata={"source": "knowledge/planes_y_precios.md"}),
-        Document(page_content="Plan hogar 300 Mbps", metadata={"source": "knowledge/planes_y_precios.md"}),
+        (Document(page_content="Plan básico 100 Mbps", metadata={"source": "knowledge/planes_y_precios.md", "doc_name": "planes_y_precios.md", "Header2": "Planes disponibles"}), 0.85),
+        (Document(page_content="Plan hogar 300 Mbps", metadata={"source": "knowledge/planes_y_precios.md", "doc_name": "planes_y_precios.md", "Header2": "Planes disponibles"}), 0.80),
     ]
 
     with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
-        mock_store_cls.return_value.similarity_search.return_value = mock_docs
+        mock_store_cls.return_value.similarity_search_with_score.return_value = mock_docs
 
         from app.rag import retriever
-        # Recargar para que el patch tenga efecto
         import importlib
         importlib.reload(retriever)
 
@@ -75,7 +74,56 @@ def test_rag_retriever_formats_results():
              patch.object(retriever, "get_embeddings", return_value=MagicMock()):
             result = retriever.search_knowledge("planes")
 
-    assert "[1]" in result or "Plan" in result
+    assert "[1]" in result
+    assert "Plan" in result
+    assert "Planes disponibles" in result
+
+
+def test_rag_score_threshold_filters_low_scores():
+    """Chunks con score bajo el umbral no deben aparecer en el resultado."""
+    from langchain_core.documents import Document
+
+    low_score_docs = [
+        (Document(page_content="Contenido irrelevante", metadata={"source": "x.md", "doc_name": "x.md"}), 0.40),
+    ]
+
+    with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
+        mock_store_cls.return_value.similarity_search_with_score.return_value = low_score_docs
+
+        from app.rag import retriever
+        import importlib
+        importlib.reload(retriever)
+
+        with patch.object(retriever, "get_qdrant_client", return_value=MagicMock()), \
+             patch.object(retriever, "get_embeddings", return_value=MagicMock()):
+            result = retriever.search_knowledge("consulta cualquiera")
+
+    assert "No se encontró" in result
+
+
+def test_rag_metadata_includes_section_header():
+    """El resultado formateado debe incluir el header de sección del chunk."""
+    from langchain_core.documents import Document
+
+    docs = [
+        (Document(
+            page_content="1. Desenchufar el router 30 segundos.",
+            metadata={"source": "knowledge/guia.md", "doc_name": "guia.md", "Header2": "Pasos para restablecer la conexión"},
+        ), 0.90),
+    ]
+
+    with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
+        mock_store_cls.return_value.similarity_search_with_score.return_value = docs
+
+        from app.rag import retriever
+        import importlib
+        importlib.reload(retriever)
+
+        with patch.object(retriever, "get_qdrant_client", return_value=MagicMock()), \
+             patch.object(retriever, "get_embeddings", return_value=MagicMock()):
+            result = retriever.search_knowledge("cómo reiniciar router")
+
+    assert "Pasos para restablecer la conexión" in result
 
 
 # ---------------------------------------------------------------------------
