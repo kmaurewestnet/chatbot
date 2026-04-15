@@ -1,6 +1,8 @@
 from functools import lru_cache
 
 from langchain_qdrant import QdrantVectorStore
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain_community.document_compressors.flashrank_rerank import FlashrankRerank
 from qdrant_client import QdrantClient
 
 from app.config import settings
@@ -14,22 +16,10 @@ def get_qdrant_client() -> QdrantClient:
 
 def search_knowledge(query: str, k: int | None = None) -> str:
     """
-    Busca en la base de conocimiento de Qdrant y retorna los chunks más relevantes
-    formateados como string para inyección directa en el contexto del LLM.
-
-    Solo retorna chunks con score de similitud coseno >= rag_score_threshold.
-    Si ningún chunk supera el umbral, retorna el mensaje de fallback para que
-    el LLM responda que no tiene información (sin inventar).
-
-    Args:
-        query: Texto de búsqueda semántica.
-        k: Número de chunks a recuperar. Si es None, usa settings.rag_top_k.
-
-    Returns:
-        String con los chunks formateados, o mensaje de fallback si no hay resultados relevantes.
+    Busca en la base de conocimiento de Qdrant, aplica Re-Ranking usando FlashRank,
+    y retorna los chunks más relevantes formateados para el prompt.
     """
     effective_k = k if k is not None else settings.rag_top_k
-    threshold = settings.rag_score_threshold
 
     store = QdrantVectorStore(
         client=get_qdrant_client(),
@@ -38,19 +28,23 @@ def search_knowledge(query: str, k: int | None = None) -> str:
     )
 
     try:
-        results = store.similarity_search_with_score(query, k=effective_k)
+        # Recuperamos una muestra más grande para que el Re-Ranker tenga de donde elegir
+        base_retriever = store.as_retriever(search_kwargs={"k": effective_k * 2})
+        compressor = FlashrankRerank(top_n=effective_k)
+        compression_retriever = ContextualCompressionRetriever(
+            base_compressor=compressor,
+            base_retriever=base_retriever
+        )
+        compressed_docs = compression_retriever.invoke(query)
     except Exception:
-        # Colección vacía o no creada aún
+        # Fallback si Qdrant falla, colección vacía, o Flashrank falla
         return "No se encontró información relevante en la base de conocimiento."
 
-    # Filtrar por umbral de similitud coseno (langchain-qdrant retorna [0,1], mayor=mejor)
-    filtered = [(doc, score) for doc, score in results if score >= threshold]
-
-    if not filtered:
+    if not compressed_docs:
         return "No se encontró información relevante en la base de conocimiento."
 
     parts = []
-    for i, (doc, score) in enumerate(filtered, 1):
+    for i, doc in enumerate(compressed_docs, 1):
         doc_name = doc.metadata.get(
             "doc_name",
             doc.metadata.get("source", "desconocido").split("/")[-1].split("\\")[-1],

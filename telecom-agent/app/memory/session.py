@@ -4,6 +4,7 @@ Memoria de sesión respaldada en Redis.
 Keys por sesión:
   session:{session_id}:messages     → historial serializado (JSON)
   session:{session_id}:customer_id  → ID del cliente identificado (string)
+  session:{session_id}:stage        → etapa actual de la conversación (string)
 
 TTL: 24 horas desde la última escritura (configurado en settings).
 """
@@ -52,8 +53,22 @@ class SessionMemory:
     async def save_customer_id(self, session_id: str, customer_id: str) -> None:
         await self.redis.setex(self._cid_key(session_id), self.ttl, customer_id)
 
+    def _stage_key(self, session_id: str) -> str:
+        return f"session:{session_id}:stage"
+
+    async def get_conversation_stage(self, session_id: str) -> str:
+        stage = await self.redis.get(self._stage_key(session_id))
+        return stage if stage else "recepcion"
+
+    async def save_conversation_stage(self, session_id: str, stage: str) -> None:
+        await self.redis.setex(self._stage_key(session_id), self.ttl, stage)
+
     async def clear_session(self, session_id: str) -> None:
-        await self.redis.delete(self._msg_key(session_id), self._cid_key(session_id))
+        await self.redis.delete(
+            self._msg_key(session_id), 
+            self._cid_key(session_id),
+            self._stage_key(session_id)
+        )
 
     async def close(self) -> None:
         await self.redis.aclose()

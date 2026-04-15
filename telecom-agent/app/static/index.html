@@ -32,14 +32,14 @@
      ============================================================ -->
 <div id="app">
 
-  <!-- ===================== CHAT PANEL ===================== -->
-  <section class="panel" x-data="chatPanel">
+  <!-- ===================== CHAT AND BOT VIEW ===================== -->
+  <section class="panel" style="grid-column: span 12;" x-data="chatPanel">
 
     <div class="panel-header">
-      <span>Chat — Modo Desarrollador</span>
+      <span>Chat — Modo Desarrollador (Dual View)</span>
       <div class="actions">
         <label class="toggle-wrap">
-          <span>Tool calls</span>
+          <span>Ver Tools Internos</span>
           <label class="toggle">
             <input type="checkbox" x-model="showTools" />
             <span class="toggle-slider"></span>
@@ -49,72 +49,87 @@
       </div>
     </div>
 
-    <!-- Messages -->
-    <div id="chat-messages" x-ref="messages">
-      <template x-if="messages.length === 0">
-        <p class="empty-state">Enviá un mensaje para comenzar.</p>
-      </template>
+    <div style="display: flex; flex-direction: row; height: 100%;">
+      <!-- Left side: Normal user chat -->
+      <div style="flex: 1; border-right: 1px solid var(--border); display: flex; flex-direction: column;">
+        <div id="chat-messages" x-ref="messages" style="flex: 1; overflow-y: auto; padding: 16px;">
+          <template x-if="messages.length === 0">
+            <p class="empty-state">Enviá un mensaje para comenzar.</p>
+          </template>
 
-      <template x-for="(msg, i) in messages" :key="i">
-        <div class="msg" :class="msg.role">
-          <div class="msg-bubble" x-text="msg.content"></div>
-
-          <!-- Tool events (solo modo dev) -->
-          <template x-if="showTools && msg.toolEvents && msg.toolEvents.length > 0">
-            <div class="tool-events">
-              <template x-for="(ev, j) in msg.toolEvents" :key="j">
-                <div class="tool-event">
-                  <div class="tool-event-header">
-                    <span class="tool-tag">tool</span>
-                    <span x-text="ev.tool_name"></span>
-                  </div>
-                  <div class="tool-event-body">
-                    <div style="color:#8892b0;margin-bottom:4px">args: <span x-text="fmtToolArgs(ev.args)"></span></div>
-                    <div>→ <span x-text="fmtToolResult(ev.result)"></span></div>
-                  </div>
-                </div>
-              </template>
+          <template x-for="(msg, i) in messages" :key="i">
+            <div class="msg" :class="msg.role">
+              <div class="msg-bubble" x-text="msg.content"></div>
+              <span class="msg-time" x-text="fmtTime(msg.ts)"></span>
             </div>
           </template>
 
-          <span class="msg-time" x-text="fmtTime(msg.ts)"></span>
+          <template x-if="loading">
+            <div class="msg agent">
+              <div class="msg-bubble" style="display:flex;align-items:center;gap:8px">
+                <span class="spinner"></span>
+                <span style="color:var(--text-muted);font-size:12px">NexoBot escribiendo...</span>
+              </div>
+            </div>
+          </template>
         </div>
-      </template>
 
-      <!-- Typing indicator -->
-      <template x-if="loading">
-        <div class="msg agent">
-          <div class="msg-bubble" style="display:flex;align-items:center;gap:8px">
-            <span class="spinner"></span>
-            <span style="color:var(--text-muted);font-size:12px">el agente está pensando…</span>
+        <div id="chat-input-area" style="border-top: 1px solid var(--border); padding: 12px;">
+          <div class="session-row">
+            <span>Sesión:</span>
+            <input type="text" x-model="sessionId" spellcheck="false" />
+            <button class="btn btn-ghost btn-icon" @click="sessionId = $store?.uuid4?.() ?? crypto.randomUUID()" title="Generar nuevo ID">⟳</button>
+          </div>
+          <div class="input-row">
+            <textarea
+              id="msg-input"
+              x-model="input"
+              @keydown="onKeydown"
+              placeholder="Escribí tu mensaje… (Enter para enviar)"
+              rows="2"
+              :disabled="loading"
+            ></textarea>
+            <button class="btn btn-primary" @click="send" :disabled="loading || !input.trim()">
+              <template x-if="!loading">Enviar</template>
+              <template x-if="loading"><span class="spinner"></span></template>
+            </button>
           </div>
         </div>
-      </template>
-    </div>
-
-    <!-- Input area -->
-    <div id="chat-input-area">
-      <div class="session-row">
-        <span>Sesión:</span>
-        <input type="text" x-model="sessionId" spellcheck="false" />
-        <button class="btn btn-ghost btn-icon" @click="sessionId = $store?.uuid4?.() ?? crypto.randomUUID()" title="Generar nuevo ID">⟳</button>
       </div>
-      <div class="input-row">
-        <textarea
-          id="msg-input"
-          x-model="input"
-          @keydown="onKeydown"
-          placeholder="Escribí tu mensaje… (Enter para enviar, Shift+Enter para nueva línea)"
-          rows="2"
-          :disabled="loading"
-        ></textarea>
-        <button class="btn btn-primary" @click="send" :disabled="loading || !input.trim()">
-          <template x-if="!loading">Enviar</template>
-          <template x-if="loading"><span class="spinner"></span></template>
-        </button>
-      </div>
-    </div>
 
+      <!-- Right side: Bot Memory / Tool Execution Log -->
+      <div style="flex: 1; display: flex; flex-direction: column; background: var(--bg-alt); padding: 16px; overflow-y: auto;" x-show="showTools">
+        <h4 style="margin: 0 0 12px 0; color: var(--accent); font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px;">Cerebro de NexoBot (Log Interno)</h4>
+        
+        <div style="margin-bottom: 16px; padding: 12px; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px solid var(--border);">
+            <div style="font-size: 12px; color: var(--text-muted); margin-bottom: 4px;">ESTADO DE LA CONVERSACIÓN:</div>
+            <div style="font-family: monospace; color: var(--accent);" x-text="currentStage"></div>
+        </div>
+
+        <template x-for="(log, i) in botLogs" :key="i">
+            <div style="background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px; margin-bottom: 10px; font-size: 13px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px;">
+                    <strong style="color: var(--blue);" x-text="'🔧 TOOL: ' + log.tool_name"></strong>
+                </div>
+                <div style="color: var(--text-muted); margin-bottom: 4px;">ARGS:</div>
+                <div style="font-family: monospace; white-space: pre-wrap; word-break: break-all; margin-bottom: 8px; color: #a8b4c0;" x-text="log.args"></div>
+                <div style="color: var(--text-muted); margin-bottom: 4px;">RESULTADO:</div>
+                <div style="font-family: monospace; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; color: #a8b4c0;" x-text="log.result"></div>
+            </div>
+        </template>
+        
+        <template x-if="loadingTool">
+             <div style="background: rgba(0, 0, 0, 0.2); border: 1px dashed var(--border); border-radius: 6px; padding: 10px; font-size: 13px; display: flex; align-items: center; gap: 8px;">
+                <span class="spinner"></span> <span style="color: var(--text-muted);">Ejecutando tool internamente...</span>
+             </div>
+        </template>
+
+        <template x-if="botLogs.length === 0 && !loadingTool">
+            <p class="empty-state">Aún no hay llamadas a herramientas en esta interacción.</p>
+        </template>
+      </div>
+
+    </div>
   </section>
 
   <!-- ===================== KNOWLEDGE PANEL ===================== -->

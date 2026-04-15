@@ -7,8 +7,8 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_base_url: str = "http://host.docker.internal:11434"
-    llm_model: str = "qwen2.5:14b"
-    embed_model: str = "nomic-embed-text"
+    llm_model: str = "qwen3.5:9b"
+    embed_model: str = "qwen3-embedding:8b"
 
     # Qdrant
     qdrant_url: str = "http://qdrant:6333"

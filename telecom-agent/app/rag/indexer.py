@@ -18,7 +18,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams
 
 from app.config import settings
-from app.rag.embeddings import EMBED_DIM, get_embeddings
+from app.rag.embeddings import get_embedding_dimension, get_embeddings
 
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,15 @@ def _create_collection(client: QdrantClient, force: bool = False) -> None:
         logger.info("Eliminando colección existente '%s'...", settings.qdrant_collection)
         client.delete_collection(settings.qdrant_collection)
 
+    dim = get_embedding_dimension()
     logger.info(
         "Creando colección '%s' (dim=%d, distance=COSINE)...",
         settings.qdrant_collection,
-        EMBED_DIM,
+        dim,
     )
     client.create_collection(
         collection_name=settings.qdrant_collection,
-        vectors_config=VectorParams(size=EMBED_DIM, distance=Distance.COSINE),
+        vectors_config=VectorParams(size=dim, distance=Distance.COSINE),
     )
 
 

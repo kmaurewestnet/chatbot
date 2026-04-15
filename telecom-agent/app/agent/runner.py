@@ -3,7 +3,9 @@ Coordinador de sesión: conecta FastAPI con el grafo LangGraph e inyecta memoria
 """
 import logging
 
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+import json
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, AIMessageChunk
+from typing import AsyncGenerator
 from langfuse import Langfuse
 from langfuse.callback import CallbackHandler
 
@@ -132,3 +134,54 @@ async def run_session_dev(session_id: str, user_message: str) -> dict:
         "tool_events": _extract_tool_events(result["messages"]),
         "message_count": len(result["messages"]),
     }
+
+
+async def run_session_stream(session_id: str, user_message: str) -> AsyncGenerator[str, None]:
+    """
+    Versión con streaming asíncrono para consumir token por token y eventos de tools.
+    Emite JSONlines (NDJSON) con {"type": "...", ...}
+    """
+    history = await session_memory.get_history(session_id)
+    customer_id = await session_memory.get_customer_id(session_id)
+    conversation_stage = await session_memory.get_conversation_stage(session_id)
+
+    initial_state = AgentState(
+        messages=history + [HumanMessage(content=user_message)],
+        customer_id=customer_id,
+        conversation_stage=conversation_stage,
+        session_metadata={"session_id": session_id},
+    )
+
+    final_state = None
+
+    async for stream_mode, data in compiled_graph.astream(
+        initial_state,
+        stream_mode=["messages", "values"],
+        config=_build_invoke_config(session_id)
+    ):
+        if stream_mode == "messages":
+            msg, _ = data
+            if isinstance(msg, AIMessageChunk):
+                if msg.content:
+                    yield json.dumps({"type": "chunk", "content": msg.content}) + "\n"
+                if msg.tool_call_chunks:
+                    for tc in msg.tool_call_chunks:
+                        if tc.get("args"):
+                            yield json.dumps({"type": "tool_call_chunk", "args": tc["args"]}) + "\n"
+                        elif tc.get("name"):
+                            yield json.dumps({"type": "tool_start", "tool_name": tc["name"]}) + "\n"
+            elif isinstance(msg, ToolMessage):
+                yield json.dumps({"type": "tool_end", "tool_name": msg.name, "result": msg.content}) + "\n"
+
+        elif stream_mode == "values":
+            final_state = data
+
+    if final_state is not None:
+        await session_memory.save_history(session_id, final_state["messages"])
+        new_customer_id = final_state.get("customer_id")
+        if new_customer_id and new_customer_id != customer_id:
+            await session_memory.save_customer_id(session_id, new_customer_id)
+        new_stage = final_state.get("conversation_stage")
+        if new_stage and new_stage != conversation_stage:
+            await session_memory.save_conversation_stage(session_id, new_stage)
+

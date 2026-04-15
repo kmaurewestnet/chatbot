@@ -1,4 +1,4 @@
-FROM qwen2.5:7b
+FROM qwen3.5:9b
 
 # Parámetros de generación
 PARAMETER temperature 0.3

@@ -69,9 +69,13 @@ document.addEventListener('alpine:init', () => {
   Alpine.data('chatPanel', () => ({
     sessionId: uuid4(),
     messages: [],
+    botLogs: [],
+    currentStage: 'recepcion',
     input: '',
     loading: false,
-    showTools: false,
+    loadingTool: false,
+    showTools: true,
+    ws: null,
 
     async send() {
       const text = this.input.trim();
@@ -79,40 +83,80 @@ document.addEventListener('alpine:init', () => {
       this.input = '';
       this.loading = true;
 
-      this.messages.push({ role: 'user', content: text, ts: new Date(), toolEvents: [] });
+      this.messages.push({ role: 'user', content: text, ts: new Date() });
       this.$nextTick(() => this.scrollBottom());
 
-      try {
-        const res = await fetch(`${BASE}/chat/dev`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ session_id: this.sessionId, message: text }),
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
+      // Create a placeholder for the agent response
+      const agentMsgId = this.messages.length;
+      this.messages.push({ role: 'agent', content: '', ts: new Date() });
 
-        this.messages.push({
-          role: 'agent',
-          content: data.response,
-          ts: new Date(),
-          toolEvents: data.tool_events || [],
-        });
+      try {
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws/${this.sessionId}`;
+        
+        let localWs = new WebSocket(wsUrl);
+        
+        localWs.onopen = () => {
+            localWs.send(text);
+        };
+
+        localWs.onmessage = (event) => {
+            // Because NDJSON might come in chunks, we process lines
+            const lines = event.data.split('\n');
+            for (let line of lines) {
+                if (!line.trim()) continue;
+                try {
+                    const data = JSON.parse(line);
+                    if (data.type === 'chunk') {
+                        this.messages[agentMsgId].content += data.content;
+                        this.loading = false;
+                        this.$nextTick(() => this.scrollBottom());
+                    } else if (data.type === 'tool_call_chunk' || data.type === 'tool_start') {
+                        this.loadingTool = true;
+                        // Avoid adding duplicates if tool_call_chunk arrives multiple times for same tool
+                        // We will rely on tool_end to populate the log definitively
+                    } else if (data.type === 'tool_end') {
+                        this.loadingTool = false;
+                        if (data.tool_name === 'marcar_etapa_conversacion') {
+                            // Extract the args roughly
+                            const match = data.result.match(/Etapa de conversación actualizada a: (.*)/);
+                            if (match) this.currentStage = match[1];
+                        }
+                        this.botLogs.push({
+                            tool_name: data.tool_name,
+                            args: '...', // We don't have exact args from tool_end unless we intercept them in backend, but we can just say "ver result"
+                            result: data.result
+                        });
+                        this.$nextTick(() => this.scrollBottom());
+                    }
+                } catch (e) {
+                    console.error('JSON Parse error', e, line);
+                }
+            }
+        };
+
+        localWs.onclose = () => {
+            this.loading = false;
+            this.loadingTool = false;
+        };
+
+        localWs.onerror = (e) => {
+             console.error('WebSocket error', e);
+             this.loading = false;
+        };
+
       } catch (e) {
-        this.messages.push({
-          role: 'agent',
-          content: `Error: ${e.message}`,
-          ts: new Date(),
-          toolEvents: [],
-        });
-      } finally {
+        this.messages[agentMsgId].content = `Error: ${e.message}`;
         this.loading = false;
-        this.$nextTick(() => this.scrollBottom());
       }
     },
 
     newSession() {
       this.sessionId = uuid4();
       this.messages = [];
+      this.botLogs = [];
+      this.currentStage = 'recepcion';
+      this.loadingTool = false;
     },
 
     fmtTime(d) {

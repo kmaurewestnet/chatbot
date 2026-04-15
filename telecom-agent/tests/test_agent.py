@@ -17,10 +17,11 @@ import pytest
 # ---------------------------------------------------------------------------
 
 def test_tools_registered():
-    """Verificar que los 7 tools están registrados con los nombres correctos."""
+    """Verificar que los 8 tools están registrados con los nombres correctos."""
     from app.tools.tools import ALL_TOOLS
 
     tool_names = {t.name for t in ALL_TOOLS}
+    assert "marcar_etapa_conversacion" in tool_names
     assert "consultar_cliente_dni" in tool_names
     assert "verificar_estado_red" in tool_names
     assert "diagnosticar_router_cliente" in tool_names
@@ -28,7 +29,7 @@ def test_tools_registered():
     assert "generar_visita_tecnica" in tool_names
     assert "registrar_solicitud_baja" in tool_names
     assert "buscar_en_base_conocimiento" in tool_names
-    assert len(ALL_TOOLS) == 7
+    assert len(ALL_TOOLS) == 8
 
 
 def test_tools_have_docstrings():
@@ -45,8 +46,9 @@ def test_tools_have_docstrings():
 
 def test_rag_retriever_empty_collection():
     """El retriever debe retornar mensaje de fallback si no hay resultados."""
-    with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
-        mock_store_cls.return_value.similarity_search_with_score.return_value = []
+    with patch("app.rag.retriever.ContextualCompressionRetriever") as mock_comp_cls, \
+         patch("app.rag.retriever.FlashrankRerank") as mock_flash_cls:
+        mock_comp_cls.return_value.invoke.return_value = []
 
         from app.rag.retriever import search_knowledge
 
@@ -59,12 +61,13 @@ def test_rag_retriever_formats_results():
     from langchain_core.documents import Document
 
     mock_docs = [
-        (Document(page_content="Plan básico 100 Mbps", metadata={"source": "knowledge/planes_y_precios.md", "doc_name": "planes_y_precios.md", "Header2": "Planes disponibles"}), 0.85),
-        (Document(page_content="Plan hogar 300 Mbps", metadata={"source": "knowledge/planes_y_precios.md", "doc_name": "planes_y_precios.md", "Header2": "Planes disponibles"}), 0.80),
+        Document(page_content="Plan básico 100 Mbps", metadata={"source": "knowledge/planes_y_precios.md", "doc_name": "planes_y_precios.md", "Header2": "Planes disponibles"}),
+        Document(page_content="Plan hogar 300 Mbps", metadata={"source": "knowledge/planes_y_precios.md", "doc_name": "planes_y_precios.md", "Header2": "Planes disponibles"}),
     ]
 
-    with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
-        mock_store_cls.return_value.similarity_search_with_score.return_value = mock_docs
+    with patch("app.rag.retriever.ContextualCompressionRetriever") as mock_comp_cls, \
+         patch("app.rag.retriever.FlashrankRerank") as mock_flash_cls:
+        mock_comp_cls.return_value.invoke.return_value = mock_docs
 
         from app.rag import retriever
         import importlib
@@ -79,41 +82,20 @@ def test_rag_retriever_formats_results():
     assert "Planes disponibles" in result
 
 
-def test_rag_score_threshold_filters_low_scores():
-    """Chunks con score bajo el umbral no deben aparecer en el resultado."""
-    from langchain_core.documents import Document
-
-    low_score_docs = [
-        (Document(page_content="Contenido irrelevante", metadata={"source": "x.md", "doc_name": "x.md"}), 0.40),
-    ]
-
-    with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
-        mock_store_cls.return_value.similarity_search_with_score.return_value = low_score_docs
-
-        from app.rag import retriever
-        import importlib
-        importlib.reload(retriever)
-
-        with patch.object(retriever, "get_qdrant_client", return_value=MagicMock()), \
-             patch.object(retriever, "get_embeddings", return_value=MagicMock()):
-            result = retriever.search_knowledge("consulta cualquiera")
-
-    assert "No se encontró" in result
-
-
 def test_rag_metadata_includes_section_header():
     """El resultado formateado debe incluir el header de sección del chunk."""
     from langchain_core.documents import Document
 
     docs = [
-        (Document(
+        Document(
             page_content="1. Desenchufar el router 30 segundos.",
             metadata={"source": "knowledge/guia.md", "doc_name": "guia.md", "Header2": "Pasos para restablecer la conexión"},
-        ), 0.90),
+        ),
     ]
 
-    with patch("app.rag.retriever.QdrantVectorStore") as mock_store_cls:
-        mock_store_cls.return_value.similarity_search_with_score.return_value = docs
+    with patch("app.rag.retriever.ContextualCompressionRetriever") as mock_comp_cls, \
+         patch("app.rag.retriever.FlashrankRerank") as mock_flash_cls:
+        mock_comp_cls.return_value.invoke.return_value = docs
 
         from app.rag import retriever
         import importlib
@@ -273,7 +255,7 @@ def test_settings_defaults():
         langfuse_nextauth_secret="test",
         _env_file=None,
     )
-    assert s.llm_model == "qwen2.5:14b"
-    assert s.embed_model == "nomic-embed-text"
+    assert s.llm_model == "qwen3.5:9b"
+    assert s.embed_model == "qwen3-embedding:8b"
     assert s.qdrant_collection == "telecom_knowledge"
     assert s.redis_ttl_seconds == 86400
