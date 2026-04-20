@@ -15,12 +15,12 @@ fi
 
 # 2. Descargar modelos Ollama
 echo ""
-echo "[1/5] Descargando modelo LLM: qwen2.5:14b"
-ollama pull qwen2.5:14b
+echo "[1/5] Descargando modelo LLM: qwen3.5:9b"
+ollama pull qwen3.5:9b
 
 echo ""
-echo "[2/5] Descargando modelo de embeddings: nomic-embed-text"
-ollama pull nomic-embed-text
+echo "[2/5] Descargando modelo de embeddings: qwen3-embedding:8b"
+ollama pull qwen3-embedding:8b
 
 # 3. Crear modelo customizado con Modelfile
 echo ""

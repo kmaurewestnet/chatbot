@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Entornos Virtuales
+venv/
+env/
+.venv/
+
+# Variables de entorno (¡CRÍTICO no subir!)
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# IDEs y Editores
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker (Asegura no subir carpetas bindeables a volumenes locales)
+redis_data/
+qdrant_data/
+postgres_data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest / Coverage
+.pytest_cache/
+.coverage
+htmlcov/

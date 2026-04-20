@@ -7,8 +7,8 @@ class Settings(BaseSettings):
 
     # Ollama
     ollama_base_url: str = "http://host.docker.internal:11434"
-    llm_model: str = "qwen2.5:14b"
-    embed_model: str = "nomic-embed-text"
+    llm_model: str = "qwen3.5:9b"
+    embed_model: str = "qwen3-embedding:8b"
 
     # Qdrant
     qdrant_url: str = "http://qdrant:6333"
@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     langfuse_host: str = "http://langfuse:3000"
     langfuse_public_key: str = "change_me"
     langfuse_secret_key: str = "change_me"
+
+    # RAG — chunking
+    rag_chunk_size: int = 1024
+    rag_chunk_overlap: int = 128
+    # RAG — retrieval
+    rag_top_k: int = 6
+    rag_score_threshold: float = 0.65
 
 
 @lru_cache(maxsize=1)

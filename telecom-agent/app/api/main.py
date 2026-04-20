@@ -22,7 +22,7 @@ from fastapi import FastAPI, File, Form, Request, Response, UploadFile, WebSocke
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app.agent.runner import run_session, run_session_dev
+from app.agent.runner import run_session, run_session_dev, run_session_stream
 from app.api.health_detail import router as health_detail_router
 from app.api.knowledge import router as knowledge_router
 from app.api.openai_compat import router as openai_compat_router
@@ -140,6 +140,8 @@ async def chat_dev(request: ChatRequest):
     )
 
 
+
+
 @app.websocket("/ws/{session_id}")
 async def websocket_chat(websocket: WebSocket, session_id: str):
     """WebSocket para chat en tiempo real (web/app móvil)."""
@@ -147,8 +149,8 @@ async def websocket_chat(websocket: WebSocket, session_id: str):
     try:
         while True:
             data = await websocket.receive_text()
-            response = await run_session(session_id, data)
-            await websocket.send_text(response)
+            async for chunk in run_session_stream(session_id, data):
+                await websocket.send_text(chunk)
     except WebSocketDisconnect:
         logger.info("WebSocket desconectado: sesión %s", session_id)
 
