@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from app.agent.runner import run_session, run_session_dev
 from app.api.health_detail import router as health_detail_router
 from app.api.knowledge import router as knowledge_router
+from app.api.openai_compat import router as openai_compat_router
 from app.config import settings
 from app.memory.session import session_memory
 
@@ -80,6 +81,7 @@ app = FastAPI(
 
 app.include_router(knowledge_router, prefix="/knowledge", tags=["knowledge"])
 app.include_router(health_detail_router, prefix="/health", tags=["health"])
+app.include_router(openai_compat_router)
 
 
 # ---------------------------------------------------------------------------

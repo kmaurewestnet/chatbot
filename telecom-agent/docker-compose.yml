@@ -60,7 +60,33 @@ services:
       TELEMETRY_ENABLED: "false"
     restart: unless-stopped
 
+  openwebui:
+    image: ghcr.io/open-webui/open-webui:main
+    ports:
+      - "8080:8080"
+    depends_on:
+      - api
+    environment:
+      OPENAI_API_BASE_URL: "http://api:8000/v1"
+      OPENAI_API_KEY: "sk-local"
+      ENABLE_OLLAMA_API: "false"
+      ENABLE_AUDIO_TRANSCRIPTION: "true"
+      AUDIO_STT_ENGINE: "whisper"
+      WHISPER_MODEL: "base"
+      DEFAULT_MODELS: "telecom-agent"
+      DATA_PATH: "/app/backend/data"
+    volumes:
+      - openwebui_data:/app/backend/data
+    restart: unless-stopped
+
+  docling:
+    image: quay.io/docling-project/docling-serve:latest
+    expose:
+      - "5001"
+    restart: unless-stopped
+
 volumes:
   redis_data:
   qdrant_data:
   postgres_data:
+  openwebui_data:

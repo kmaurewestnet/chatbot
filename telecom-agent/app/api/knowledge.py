@@ -17,6 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
+import httpx
 from fastapi import APIRouter, BackgroundTasks, File, HTTPException, UploadFile
 from pydantic import BaseModel
 
@@ -27,7 +28,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 KNOWLEDGE_DIR = (Path(__file__).parent.parent.parent / "knowledge").resolve()
-ALLOWED_EXTENSIONS = {".md", ".txt"}
+ALLOWED_EXTENSIONS = {".md", ".txt", ".pdf", ".docx", ".pptx"}
+DOCLING_EXTENSIONS = {".pdf", ".docx", ".pptx"}
+DOCLING_URL = "http://docling:5001/v1/convert/file"
 
 # ---------------------------------------------------------------------------
 # In-memory job registry (suficiente para una herramienta de desarrollo)
@@ -89,6 +92,22 @@ def _file_info(path: Path) -> KnowledgeFileInfo:
         size_bytes=stat.st_size,
         modified_iso=datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
     )
+
+
+async def _extract_with_docling(file_bytes: bytes, filename: str) -> str:
+    """Envía el archivo a Docling y devuelve el texto extraído como markdown."""
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            DOCLING_URL,
+            files={"files": (filename, file_bytes, "application/octet-stream")},
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    doc = data.get("document", {})
+    md_text = doc.get("md_content") or doc.get("export_formats", {}).get("md", "")
+    if not md_text:
+        raise ValueError(f"Docling no devolvió contenido markdown para {filename}")
+    return md_text
 
 
 def _run_reindex(job_id: str) -> None:
@@ -154,17 +173,47 @@ async def update_knowledge_file(filename: str, body: KnowledgeFileUpdate):
 
 
 @router.post("", response_model=KnowledgeFileInfo, status_code=201)
-async def upload_knowledge_file(file: UploadFile = File(...)):
-    """Sube un archivo nuevo a knowledge/."""
+async def upload_knowledge_file(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+):
+    """
+    Sube un archivo nuevo a knowledge/.
+    Acepta .md y .txt (guardado directo) o .pdf/.docx/.pptx (extraídos via Docling → guardados como .md).
+    Dispara un re-indexado automático tras el upload.
+    """
     if not file.filename:
         raise HTTPException(status_code=422, detail="Nombre de archivo requerido.")
     suffix = Path(file.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=422, detail="Solo se permiten archivos .md o .txt.")
-    path = _safe_path(Path(file.filename).name)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Tipo no soportado. Permitidos: {', '.join(sorted(ALLOWED_EXTENSIONS))}",
+        )
+
     KNOWLEDGE_DIR.mkdir(parents=True, exist_ok=True)
-    content = await file.read()
-    path.write_bytes(content)
+    file_bytes = await file.read()
+
+    if suffix in DOCLING_EXTENSIONS:
+        try:
+            md_text = await _extract_with_docling(file_bytes, file.filename)
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(status_code=502, detail=f"Docling devolvió error {exc.response.status_code}.")
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=f"Error al procesar con Docling: {exc}")
+
+        save_name = Path(file.filename).stem + ".md"
+        path = _safe_path(save_name)
+        path.write_text(md_text, encoding="utf-8")
+    else:
+        path = _safe_path(Path(file.filename).name)
+        path.write_bytes(file_bytes)
+
+    # Re-indexado automático en background
+    job_id = str(uuid.uuid4())
+    _jobs[job_id] = {"status": "pending", "chunks_indexed": None, "error_detail": None}
+    background_tasks.add_task(asyncio.to_thread, _run_reindex, job_id)
+
     return _file_info(path)
 
 
